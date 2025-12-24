@@ -4,6 +4,8 @@ import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.ColumnType
 import org.jetbrains.exposed.v1.core.Table
 import org.jetbrains.exposed.v1.javatime.date
+import org.jetbrains.exposed.v1.jdbc.insert
+import java.time.LocalDate
 
 object WeatherTable : Table("weather") {
     val city = varchar("city", 80)
@@ -11,6 +13,31 @@ object WeatherTable : Table("weather") {
     val tempHi = integer("temp_hi")
     val prcp = float("prcp")
     val date = date("date")
+
+
+}
+fun WeatherTable.insertDummyData()  {
+    WeatherTable.insert {
+        it[city] = "San Francisco"
+        it[tempLo] = 46
+        it[tempHi] = 50
+        it[prcp] = 0.25f
+        it[date] = LocalDate.of(1994, 11, 27)
+    }
+    WeatherTable.insert {
+        it[city] = "San Francisco"
+        it[tempLo] = 43
+        it[tempHi] = 57
+        it[prcp] = 0f
+        it[date] = LocalDate.of(1994, 11, 29)
+    }
+    WeatherTable.insert {
+        it[city] = "Hayward"
+        it[tempLo] = 37
+        it[tempHi] = 54
+        it[prcp] = 0f
+        it[date] = LocalDate.of(1994, 11, 29)
+    }
 }
 
 object CityTable : Table("cities") {

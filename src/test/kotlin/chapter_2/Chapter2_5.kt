@@ -23,29 +23,7 @@ class Chapter2_5 : AbstractPostgreSqlTest() {
     fun `Querying a Table`() {
         withTransaction {
             SchemaUtils.create(WeatherTable)
-            // select all record
-            WeatherTable.insert {
-                it[city] = "San Francisco"
-                it[tempLo] = 46
-                it[tempHi] = 50
-                it[prcp] = 0.25f
-                it[date] = LocalDate.of(1994, 11, 27)
-            }
-            WeatherTable.insert {
-                it[city] = "San Francisco"
-                it[tempLo] = 43
-                it[tempHi] = 57
-                it[prcp] = 0f
-                it[date] = LocalDate.of(1994, 11, 29)
-            }
-            WeatherTable.insert {
-                it[city] = "Hayward"
-                it[tempLo] = 37
-                it[tempHi] = 54
-                it[prcp] = 0f
-                it[date] = LocalDate.of(1994, 11, 29)
-            }
-
+            WeatherTable.insertDummyData()
             // select a slice.
             WeatherTable.select(
                 WeatherTable.city
