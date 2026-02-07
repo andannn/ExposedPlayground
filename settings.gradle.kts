@@ -1,4 +1,5 @@
 pluginManagement {
+    includeBuild("build-logic")
     repositories {
         gradlePluginPortal()
         google()
@@ -13,7 +14,8 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ExposedPlayground"
+rootProject.name = "SomeKotlin"
 
 include(":test")
 include(":cinterop")
+include(":gradle-test")
