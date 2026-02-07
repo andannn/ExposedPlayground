@@ -1,0 +1,243 @@
+import org.gradle.api.GradleException
+import org.gradle.api.Project
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.FileCollection
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.provider.Provider
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
+import org.gradle.api.tasks.Optional
+import org.gradle.process.ExecOperations
+import org.gradle.process.ExecSpec
+import org.jetbrains.kotlin.gradle.utils.NativeCompilerDownloader
+import org.jetbrains.kotlin.konan.TempFiles
+import org.jetbrains.kotlin.konan.target.Family
+import org.jetbrains.kotlin.konan.target.KonanTarget
+import org.jetbrains.kotlin.konan.target.LinkerArguments
+import org.jetbrains.kotlin.konan.target.Platform
+import org.jetbrains.kotlin.konan.target.PlatformManager
+import java.io.ByteArrayOutputStream
+import javax.inject.Inject
+
+abstract class KonanBuildService
+    @Inject
+    constructor(
+        private val execOperations: ExecOperations,
+    ) : BuildService<KonanBuildService.Parameters> {
+        private val dist by lazy {
+            KonanPrebuiltsSetup.createKonanDistribution(
+                konanHome = parameters.konanHome.get().asFile,
+            )
+        }
+        private val platformManager by lazy { PlatformManager(distribution = dist) }
+
+        /** @see ClangCompileTask */
+        fun compile(parameters: ClangCompileParameters) {
+            val outputDir = parameters.output.get().asFile
+            outputDir.deleteRecursively()
+            outputDir.mkdirs()
+
+            val platform = getPlatform(parameters.konanTarget)
+            val additionalArgs =
+                buildList {
+                    addAll(parameters.freeArgs.get())
+                    add("--compile")
+                    parameters.includes.files.forEach { includeDirectory ->
+                        check(includeDirectory.isDirectory) {
+                            "Include parameter for clang must be a directory: $includeDirectory"
+                        }
+                        add("-I${includeDirectory.canonicalPath}")
+                    }
+                    addAll(parameters.sources.regularFilePaths())
+                }
+
+            val clangCommand = platform.clang.clangC(*additionalArgs.toTypedArray())
+            execOperations.executeSilently { execSpec ->
+                execSpec.executable = clangCommand.first()
+                execSpec.args(clangCommand.drop(1))
+                execSpec.workingDir = outputDir
+            }
+        }
+
+        private fun FileCollection.regularFilePaths(): List<String> =
+            files
+                .flatMap { it.walkTopDown().filter { it.isFile }.map { it.canonicalPath } }
+                .distinct()
+
+        fun getPlatform(serializableKonanTarget: Property<SerializableKonanTarget>): Platform {
+            val konanTarget = serializableKonanTarget.get().asKonanTarget
+            check(platformManager.enabled.contains(konanTarget)) {
+                "cannot find enabled target with name ${serializableKonanTarget.get()}"
+            }
+            val platform = platformManager.platform(konanTarget)
+            platform.downloadDependencies()
+            return platform
+        }
+
+        /** @see ClangLinkerTask */
+        fun runLinker(parameters: ClangLinkerParameters) {
+            val outputFile = parameters.outputFile.get().asFile
+            outputFile.delete()
+            outputFile.parentFile.mkdirs()
+
+            val platform = getPlatform(parameters.konanTarget)
+
+            // Specify max-page-size to align ELF regions to 16kb and use LLVM linker
+            // See https://youtrack.jetbrains.com/issue/KT-71728
+            val linkerFlags =
+                parameters.linkerArgs.get() +
+                    if (parameters.konanTarget
+                            .get()
+                            .asKonanTarget.family == Family.ANDROID
+                    ) {
+                        val customLld =
+                            this@KonanBuildService
+                                .parameters.androidLldPath.orNull
+                                ?.asFile
+                        if (customLld != null) {
+                            listOf(
+                                "-fuse-ld=${customLld.absolutePath}",
+                                "-z",
+                                "max-page-size=16384",
+                                "-z",
+                                "common-page-size=16384",
+                            )
+                        } else {
+                            listOf("-fuse-ld=lld", "-z", "max-page-size=16384")
+                        }
+                    } else {
+                        emptyList()
+                    }
+
+            val objectFiles = parameters.objectFiles.regularFilePaths()
+            val linkedObjectFiles = parameters.linkedObjects.regularFilePaths()
+            val linkCommands =
+                with(platform.linker) {
+                    LinkerArguments(
+                        TempFiles(),
+                        objectFiles = objectFiles,
+                        executable = outputFile.canonicalPath,
+                        libraries = linkedObjectFiles,
+                        linkerArgs = linkerFlags,
+                        optimize = true,
+                        debug = false,
+                        kind = parameters.linkerOutputKind.get(),
+                        outputDsymBundle = "unused",
+                        sanitizer = null,
+                    ).finalLinkCommands()
+                }
+            linkCommands
+                .map { it.argsWithExecutable }
+                .forEach { args ->
+                    execOperations.executeSilently { execSpec ->
+                        execSpec.executable = args.first()
+                        args
+                            .drop(1)
+                            .filter(getLinkerArgsFilter(parameters.konanTarget.get().asKonanTarget))
+                            .forEach { execSpec.args(it) }
+                    }
+                }
+        }
+
+        private fun getLinkerArgsFilter(target: KonanTarget): (String) -> Boolean =
+            { flag ->
+                // We use the linker that konan uses to be as similar as possible but that linker also has
+                // extra things we might not want or need, In the future, we can consider not using the
+                // `platform.linker` but then we would need to parse the konan.properties file to get the
+                // relevant necessary parameters like sysroot, etc.
+                // https://github.com/JetBrains/kotlin/blob/master/kotlin-native/konan/konan.properties
+                when {
+                    // Remove konan demangling, which we don't need and is not available in the default
+                    // distribution.
+                    flag == "--defsym" || flag.contains("Konan_cxa_demangle") -> false
+
+                    // b/414635735 - Remove flag to explicitly link with the shared version of GCC runtime
+                    // library as that is not widely available in all Linux distribution and we prefer
+                    // linking to the static version (via -lgcc). Found in 'linkerGccFlags' in
+                    // the konan.properties.
+                    target.family == Family.LINUX && flag == "-lgcc_s" -> false
+
+                    else -> true
+                }
+            }
+
+        /** @see ClangArchiveTask */
+        fun archiveLibrary(parameters: ClangArchiveParameters) {
+            val outputFile = parameters.outputFile.get().asFile
+            outputFile.delete()
+            outputFile.parentFile.mkdirs()
+
+            val platform = getPlatform(parameters.konanTarget)
+            val llvmArgs =
+                buildList {
+                    add("rc")
+                    add(
+                        parameters.outputFile
+                            .get()
+                            .asFile.canonicalPath,
+                    )
+                    addAll(parameters.objectFiles.regularFilePaths())
+                }
+            val commands = platform.clang.llvmAr(*llvmArgs.toTypedArray())
+            execOperations.executeSilently { execSpec ->
+                execSpec.executable = commands.first()
+                execSpec.args(commands.drop(1))
+            }
+        }
+
+        /** Execute the command without logs unless it fails. */
+        private fun <T> ExecOperations.executeSilently(block: (ExecSpec) -> T) {
+            val outputStream = ByteArrayOutputStream()
+            val errorStream = ByteArrayOutputStream()
+            val execResult =
+                exec {
+                    block(this)
+                    errorOutput = errorStream
+                    standardOutput = outputStream
+                    isIgnoreExitValue = true // we'll check it below
+                }
+            if (execResult.exitValue != 0) {
+                throw GradleException(
+                    """
+                    Compilation failed:
+                    ==== output:
+                    ${outputStream.toString(Charsets.UTF_8)}
+                    ==== error:
+                    ${errorStream.toString(Charsets.UTF_8)}
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        interface Parameters : BuildServiceParameters {
+            /** KONAN_HOME parameter for initializing konan */
+            val konanHome: DirectoryProperty
+
+            /**
+             * Use NDK lld linker in platform prebuilts for Android targets for 16KB alignment
+             *
+             * The default NDK linker used by Kotlin Native (LLD 8.0.7) is too old to support the `-z
+             * common-page-size` flag, which is required for proper 16KB page alignment without
+             * disabling RELRO (See b/476745201).
+             *
+             * The Android NDK support in Kotlin Native is not well maintained:
+             * https://kotlinlang.org/docs/native-target-support.html#tier-3
+             */
+            @get:Optional
+            val androidLldPath: RegularFileProperty
+        }
+
+        companion object {
+            internal const val KEY = "konanBuildService"
+
+            fun obtain(project: Project): Provider<KonanBuildService> =
+                project.gradle.sharedServices.registerIfAbsent(KEY, KonanBuildService::class.java) {
+                    val nativeCompilerDownloader = NativeCompilerDownloader(project)
+                    nativeCompilerDownloader.downloadIfNeeded()
+                    parameters.konanHome.set(nativeCompilerDownloader.compilerDirectory)
+
+                    println("JQN ${nativeCompilerDownloader.compilerDirectory}")
+                }
+        }
+    }

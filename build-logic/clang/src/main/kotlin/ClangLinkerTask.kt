@@ -1,0 +1,90 @@
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.ListProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.services.ServiceReference
+import org.gradle.api.tasks.CacheableTask
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Nested
+import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
+import org.gradle.workers.WorkAction
+import org.gradle.workers.WorkParameters
+import org.gradle.workers.WorkerExecutor
+import org.jetbrains.kotlin.konan.target.LinkerOutputKind
+import javax.inject.Inject
+
+@CacheableTask
+abstract class ClangLinkerTask
+    @Inject
+    constructor(
+        private val workerExecutor: WorkerExecutor,
+    ) : DefaultTask() {
+        init {
+            description =
+                "Combines multiple object files (.o) into either a shared library file" +
+                "(.so / .dylib) or an executable."
+            group = "Build"
+        }
+
+        @get:ServiceReference(KonanBuildService.KEY)
+        abstract val konanBuildService: Property<KonanBuildService>
+
+        @get:Nested
+        abstract val clangParameters: ClangLinkerParameters
+
+        @TaskAction
+        fun archive() {
+            workerExecutor.noIsolation().submit(ClangLinkerWorker::class.java) {
+                clangParameter.set(clangParameters)
+                buildService.set(konanBuildService)
+            }
+        }
+    }
+
+abstract class ClangLinkerParameters {
+    /** The kind of output the linker should produce. */
+    @get:Input abstract val linkerOutputKind: Property<LinkerOutputKind>
+
+    /** The target platform for the shared file. */
+    @get:Input abstract val konanTarget: Property<SerializableKonanTarget>
+
+    /** List of object files that will be added to the shared file output. */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val objectFiles: ConfigurableFileCollection
+
+    /**
+     * The final output file that will include the shared library containing the given
+     * [objectFiles].
+     */
+    @get:OutputFile
+    abstract val outputFile: RegularFileProperty
+
+    /**
+     * List of additional objects that will be dynamically linked with the output file. At runtime,
+     * these need to be available for the shared object output to work.
+     */
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val linkedObjects: ConfigurableFileCollection
+
+    /** List of arguments that will be passed into linker when creating a shared library. */
+    @get:Input abstract val linkerArgs: ListProperty<String>
+}
+
+private abstract class ClangLinkerWorker : WorkAction<ClangLinkerWorker.Params> {
+    interface Params : WorkParameters {
+        val clangParameter: Property<ClangLinkerParameters>
+        val buildService: Property<KonanBuildService>
+    }
+
+    override fun execute() {
+        val buildService = parameters.buildService.get()
+        buildService.runLinker(parameters.clangParameter.get())
+    }
+}

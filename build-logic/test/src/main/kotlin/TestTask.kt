@@ -2,6 +2,7 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.Project
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.services.ServiceReference
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.OutputFile
@@ -13,28 +14,30 @@ import org.gradle.workers.WorkerExecutor
 import javax.inject.Inject
 
 fun Project.createTestTask(): TaskProvider<TestTask> {
-    val a = objects.domainObjectContainer(TestSetting::class.java)
-    a.create("setting1") {
-        println("setting1 run")
+//    val a = objects.domainObjectContainer(TestSetting::class.java)
+//    a.create("setting1") {
+//        println("setting1 run")
+//    }
+//    a.create("setting2") {
+//        println("setting2 run")
+//    }
+//    a.named("setting1") {
+//        println("setting1: found $this")
+//    }
+//    val provider =
+//        a.register("registerSetting1") {
+//            println("[Lazy] setting configuration 0")
+//        }
+//    a.named("registerSetting1") {
+//        println("[Lazy] setting configuration 1")
+//    }
+//    a.configureEach {
+//        println("current setting: $name")
+//    }
+//    provider.get()
+    return project.tasks.register("customTestTask", TestTask::class.java) {
+        usesService(CountService.obtain(project))
     }
-    a.create("setting2") {
-        println("setting2 run")
-    }
-    a.named("setting1") {
-        println("setting1: found $this")
-    }
-    val provider =
-        a.register("registerSetting1") {
-            println("[Lazy] setting configuration 0")
-        }
-    a.named("registerSetting1") {
-        println("[Lazy] setting configuration 1")
-    }
-    a.configureEach {
-        println("current setting: $name")
-    }
-    provider.get()
-    return project.tasks.register("customTestTask", TestTask::class.java)
 }
 
 abstract class TestTask
@@ -59,6 +62,9 @@ abstract class TestTask
         @get:OutputFile
         abstract val destinationFile: RegularFileProperty
 
+        @get:ServiceReference(CountService.KEY)
+        abstract val myService: Property<CountService>
+
         @TaskAction
         fun run() {
             val tag = tag.get()
@@ -66,6 +72,8 @@ abstract class TestTask
             println("input: ")
             println("tag: $tag")
             println("sourceFile: ${sourceFile.get()}")
+
+            myService.get().increment()
 
             val input = sourceFile.get().asFile
             val content = input.readText()

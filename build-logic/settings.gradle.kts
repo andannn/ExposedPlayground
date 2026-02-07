@@ -18,3 +18,4 @@ dependencyResolutionManagement {
 rootProject.name = "build-logic"
 
 include(":test")
+include(":clang")

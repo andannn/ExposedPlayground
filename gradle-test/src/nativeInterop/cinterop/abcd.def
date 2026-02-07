@@ -1,0 +1,7 @@
+package = me.andannn.simplemath
+headers = simplemath.h
+
+linkerOpts.linux_x64 = -lpthread -ldl
+linkerOpts.macos_x64 = -lpthread -ldl
+
+# Static library and path for SQLite is added by AndroidX Multiplatform plugin.
