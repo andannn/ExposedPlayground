@@ -1,3 +1,19 @@
+/*
+ * Copyright 2023 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import com.android.utils.appendCapitalized
 import org.gradle.api.Action
 import org.gradle.api.NamedDomainObjectFactory
@@ -39,6 +55,20 @@ class MultiTargetNativeCompilation(
      * registered.
      */
     fun targetProvider(konanTarget: KonanTarget): Provider<NativeTargetCompilation> = nativeTargets.named(konanTarget.name)
+
+    /**
+     * Returns a provider that contains the list of [NativeTargetCompilation]s that matches the
+     * given [predicate].
+     *
+     * You can use this provider to obtain the compilation for targets needed without forcing the
+     * creation of all other targets.
+     */
+    internal fun targetsProvider(predicate: (KonanTarget) -> Boolean): Provider<List<NativeTargetCompilation>> =
+        project.provider {
+            nativeTargets.names
+                .filter { predicate(SerializableKonanTarget(it).asKonanTarget) }
+                .map { nativeTargets.getByName(it) }
+        }
 
     /**
      * Convenience method to configure multiple targets at the same time. This is equal to calling

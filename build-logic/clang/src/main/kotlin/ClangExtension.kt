@@ -1,6 +1,27 @@
+/*
+ * Copyright 2023 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import com.android.build.api.dsl.KotlinMultiplatformAndroidCompilation
+import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
+import com.android.build.gradle.api.KotlinMultiplatformAndroidPlugin
 import org.gradle.api.Action
 import org.gradle.api.NamedDomainObjectCollection
 import org.gradle.api.Project
+import org.gradle.api.plugins.ExtensionAware
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
 import org.jetbrains.kotlin.gradle.plugin.KotlinMultiplatformPluginWrapper
@@ -8,12 +29,17 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCompilation
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTargetWithHostTests
+import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
 import org.jetbrains.kotlin.konan.target.LinkerOutputKind
 
 abstract class ClangExtension(
     val project: Project,
 ) {
     private val clang = AndroidXClang(project)
+
+    /** Helper class to bundle outputs of clang compilation into an AAR / JAR. */
+    private val nativeLibraryBundler = NativeLibraryBundler(project)
+
     private val kotlinExtensionDelegate =
         lazy {
             project.afterEvaluate {
@@ -26,10 +52,19 @@ abstract class ClangExtension(
                     .configureEach { outputs.cacheIf { false } }
             }
             project.plugins.apply(KotlinMultiplatformPluginWrapper::class.java)
-            project.extensions.findByType(KotlinMultiplatformExtension::class.java)
-                ?: error("KotlinMultiplatformExtension not found")
+            project.extensions.findByType(KotlinMultiplatformExtension::class.java)!!.also {
+                it.applyAndroidXDefaultHierarchyTemplate()
+            }
         }
     private val kotlinExtension: KotlinMultiplatformExtension by kotlinExtensionDelegate
+    private val agpKmpExtensionDelegate =
+        lazy {
+            // make sure to initialize the kotlin extension by accessing the property
+            val extension = (kotlinExtension as ExtensionAware)
+            project.plugins.apply(KotlinMultiplatformAndroidPlugin::class.java)
+            extension.extensions.getByType(KotlinMultiplatformAndroidLibraryTarget::class.java)
+        }
+    val agpKmpExtension: KotlinMultiplatformAndroidLibraryTarget by agpKmpExtensionDelegate
 
     val targets: NamedDomainObjectCollection<KotlinTarget>
         get() = kotlinExtension.targets
@@ -101,6 +136,36 @@ abstract class ClangExtension(
         )
     }
 
+    /** @see NativeLibraryBundler.addNativeLibrariesToResources */
+    @JvmOverloads
+    fun addNativeLibrariesToResources(
+        jvmTarget: KotlinJvmTarget,
+        nativeCompilation: MultiTargetNativeCompilation,
+        compilationName: String = KotlinCompilation.MAIN_COMPILATION_NAME,
+    ) = nativeLibraryBundler.addNativeLibrariesToResources(
+        jvmTarget = jvmTarget,
+        nativeCompilation = nativeCompilation,
+        compilationName = compilationName,
+    )
+
+    /**
+     * Adds the native outputs from [nativeCompilation] to the jni libs dependency of the
+     * [androidTarget].
+     *
+     * @see CombineObjectFilesTask for details.
+     */
+    @JvmOverloads
+    fun addNativeLibrariesToJniLibs(
+        androidTarget: KotlinMultiplatformAndroidLibraryTarget,
+        nativeCompilation: MultiTargetNativeCompilation,
+        forTest: Boolean = false,
+    ) = nativeLibraryBundler.addNativeLibrariesToAndroidVariantSources(
+        androidTarget = androidTarget,
+        nativeCompilation = nativeCompilation,
+        forTest = forTest,
+        provideSourceDirectories = { jniLibs },
+    )
+
     @JvmOverloads
     fun androidNativeX86(block: Action<KotlinNativeTarget>? = null): KotlinNativeTarget? =
         if (project.enableAndroidNative()) {
@@ -167,6 +232,49 @@ abstract class ClangExtension(
             kotlinExtension.linuxArm64 { block?.execute(this) }
         } else {
             null
+        }
+
+    @JvmOverloads
+    fun linuxX64(block: Action<KotlinNativeTarget>? = null): KotlinNativeTarget? =
+        if (project.enableLinux()) {
+            kotlinExtension.linuxX64 { block?.execute(this) }
+        } else {
+            null
+        }
+
+    @JvmOverloads
+    fun jvm(block: Action<KotlinJvmTarget>? = null): KotlinJvmTarget? =
+        if (project.enableJvm()) {
+            kotlinExtension.jvm { block?.execute(this) }
+        } else {
+            null
+        }
+
+    @JvmOverloads
+    fun androidLibrary(block: Action<KotlinMultiplatformAndroidLibraryTarget>? = null): KotlinMultiplatformAndroidLibraryTarget? =
+        if (project.enableJvm()) {
+            agpKmpExtension.also { block?.execute(it) }
+        } else {
+            null
+        }
+
+    @OptIn(ExperimentalKotlinGradlePluginApi::class)
+    private fun KotlinMultiplatformExtension.applyAndroidXDefaultHierarchyTemplate() =
+        applyDefaultHierarchyTemplate {
+            common {
+                group("jvmAndAndroid") {
+                    // TODO(b/442950553): Switch to withAndroidTarget when bug is fixed
+                    withCompilations { it is KotlinMultiplatformAndroidCompilation }
+                    withJvm()
+                }
+                group("nonJvm") {
+                    withNative()
+                    group("web") {
+                        withWasmJs()
+                        withJs()
+                    }
+                }
+            }
         }
 
     companion object {

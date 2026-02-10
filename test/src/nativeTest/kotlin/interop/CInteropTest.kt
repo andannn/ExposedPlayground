@@ -7,7 +7,7 @@ import kotlinx.cinterop.*
 import platform.posix.*
 import kotlin.test.*
 
-class InteropTest {
+class CInteropTest {
     @Test
     fun `getpid test`() {
         val pid = getpid()

@@ -3,11 +3,15 @@
 
 package interop
 
-import kotlinx.cinterop.*
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.cValue
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.useContents
 import my.simple.math.*
-import kotlin.test.*
+import kotlin.test.Test
+import kotlin.test.assertEquals
 
-class SimpleMathTest {
+class CInterOpDefTest {
     @Test
     fun `test custom c library basic`() {
         // 直接调用 C 函数
