@@ -22,3 +22,4 @@ rootProject.name = "SomeKotlin"
 include(":test")
 include(":cinterop-def")
 include(":bundled-c-source")
+include(":libuv")

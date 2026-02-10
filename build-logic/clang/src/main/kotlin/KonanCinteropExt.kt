@@ -38,7 +38,6 @@ internal fun MultiTargetNativeCompilation.configureCinterop(
     }
     val konanTarget = kotlinNativeTarget.konanTarget
     val nativeTargetCompilation = targetProvider(konanTarget)
-    println("JQN target: $konanTarget ${nativeTargetCompilation.hashCode()}")
     val taskNamePrefix = "androidXCinterop".appendCapitalized(kotlinNativeTarget.name, archiveName)
     val createDefFileTask =
         registerCreateDefFileTask(

@@ -7,11 +7,11 @@ import org.gradle.api.Project
 import org.gradle.kotlin.dsl.create
 import org.gradle.kotlin.dsl.findByType
 
-class TestPlugin2 : Plugin<Project> {
+class KmpLibraryPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         val kmpExtension =
-            project.extensions.create<ClangExtension>(
-                ClangExtension.EXTENSION_NAME,
+            project.extensions.create<KMPExtension>(
+                KMPExtension.EXTENSION_NAME,
                 project,
             )
 

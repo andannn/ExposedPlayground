@@ -32,7 +32,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTargetWithHostTests
 import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
 import org.jetbrains.kotlin.konan.target.LinkerOutputKind
 
-abstract class ClangExtension(
+abstract class KMPExtension(
     val project: Project,
 ) {
     private val clang = AndroidXClang(project)
@@ -278,7 +278,7 @@ abstract class ClangExtension(
         }
 
     companion object {
-        const val EXTENSION_NAME = "clang"
+        const val EXTENSION_NAME = "kmpExtension"
     }
 }
 

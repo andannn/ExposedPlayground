@@ -252,8 +252,6 @@ abstract class KonanBuildService
                     val nativeCompilerDownloader = NativeCompilerDownloader(project)
                     nativeCompilerDownloader.downloadIfNeeded()
                     parameters.konanHome.set(nativeCompilerDownloader.compilerDirectory)
-
-                    println("JQN ${nativeCompilerDownloader.compilerDirectory}")
                 }
         }
     }

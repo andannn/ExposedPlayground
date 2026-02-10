@@ -10,9 +10,9 @@ dependencies {
 
 gradlePlugin {
     plugins {
-        register("TestPlugin2") {
+        register("KmpLibraryPlugin") {
             id = "test.plugin2"
-            implementationClass = "TestPlugin2"
+            implementationClass = "KmpLibraryPlugin"
         }
     }
 }

@@ -6,17 +6,15 @@ plugins {
     id("com.dorongold.task-tree")
 }
 
-val testArtifacts by configurations.creating {
-    isCanBeConsumed = true
-    isCanBeResolved = false
-}
-
-clang {
+kmpExtension {
     val requiredNativeTargets =
         listOf(
             KonanTarget.MACOS_ARM64,
             KonanTarget.LINUX_ARM64,
             KonanTarget.LINUX_X64,
+            KonanTarget.ANDROID_X64,
+            KonanTarget.ANDROID_X86,
+            KonanTarget.ANDROID_ARM64,
         )
 
     val nativeCompilation =
@@ -64,11 +62,6 @@ clang {
 
         addNativeLibrariesToJniLibs(this, jniCompile)
     }
-
-    artifacts.add(
-        "testArtifacts",
-        nativeCompilation.sharedArchiveOutputFor(KonanTarget.MACOS_ARM64),
-    )
 
     targets.configureEach {
         val target = this
