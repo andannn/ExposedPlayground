@@ -1,0 +1,6 @@
+package = libuv
+headers = uv.h
+
+linkerOpts.linux_x64 = -lpthread -ldl
+linkerOpts.macos_x64 = -lpthread -ldl
+compilerOpts = -Ic/include
